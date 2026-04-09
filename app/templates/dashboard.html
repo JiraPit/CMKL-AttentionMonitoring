@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attention Monitoring System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Attention Monitoring System</h1>
+            <div class="header-right">
+                <a href="/report" class="btn btn-secondary">View Reports</a>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="video-section">
+                <div class="video-container">
+                    <img id="videoFeed" src="" alt="Video Feed" style="display: none;">
+                    <div id="placeholder" class="placeholder">
+                        <p>Select a mode and start processing</p>
+                    </div>
+                </div>
+                
+                <div class="video-controls">
+                    <div class="mode-selector">
+                        <label class="radio-option">
+                            <input type="radio" name="mode" value="webcam" checked>
+                            <span class="radio-label">Webcam</span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="mode" value="upload">
+                            <span class="radio-label">Upload Video</span>
+                        </label>
+                    </div>
+                    
+                    <div class="controls-right">
+                        <div id="uploadSection" class="upload-section" style="display: none;">
+                            <input type="file" id="videoInput" accept="video/*" hidden>
+                            <button id="btnUpload" class="btn btn-secondary">Select Video</button>
+                            <span id="fileName" class="file-name"></span>
+                        </div>
+                        <button id="btnStart" class="btn btn-primary">Start</button>
+                    </div>
+                </div>
+            </div>
+
+            <aside class="status-panel">
+                <h2>Face Status</h2>
+                <div id="faceList" class="face-list">
+                    <div class="empty-state">No faces detected</div>
+                </div>
+                
+                <div class="stats-section">
+                    <h3>Summary</h3>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Faces:</span>
+                        <span id="totalFaces" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Attentive:</span>
+                        <span id="forwardFaces" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Attention Rate:</span>
+                        <span id="attentionRate" class="stat-value">0%</span>
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

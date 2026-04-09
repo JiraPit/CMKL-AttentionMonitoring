@@ -10,133 +10,146 @@ A Flask-based attention monitoring website that processes video frames to detect
 ## Processing Pipeline
 
 ```
-FULL FRAME → YOLOv8s → Cropped Faces → ByteTrack → MediaPipe FaceMesh
-                ↓                                        ↓
-         Bounding boxes                          Key landmarks
-         (for overlay)                            (nose, chin, eyes,
-                                                    mouth corners)
-                                                        ↓
-                                                   Direction vector
-                                                   (yaw, pitch, roll)
-                                                        ↓
-                           ┌─────────────────────────────────────┐
-                           │  FULL FRAME + Overlay              │
-                           │  • Green box = yaw/pitch < ±15°     │
-                           │  • Red box = yaw/pitch >= ±15°     │
-                           └─────────────────────────────────────┘
+FULL FRAME → YOLO11n-face → Cropped Faces → ByteTrack → MediaPipe FaceMesh
+                ↓                                              ↓
+         Bounding boxes                                Key landmarks + Blendshapes
+         (for overlay)                                  (nose, eyes, mouth)
+                                                               ↓
+                                                          Direction vector + Eye state
+                                                          (yaw, pitch, roll)
+                                                               ↓
+                                      ┌─────────────────────────────────────┐
+                                      │  FULL FRAME + Overlay              │
+                                      │  • Green box = Forward            │
+                                      │  • Red box = Not Forward          │
+                                      │  • Eye state below box            │
+                                      └─────────────────────────────────────┘
 ```
 
-### Step 1: Face Detection (YOLOv8s)
-- Model: `yolov8s-face.pt`
+### Step 1: Face Detection (YOLOv11n)
+- Model: `yolo11n-face.pt` (YOLOv11n face detection from HuggingFace)
 - Input: Full video frame
-- Output: List of face bounding boxes + cropped face images
+- Output: List of face bounding boxes + cropped images
 
 ### Step 2: Face Tracking (ByteTrack)
-- Algorithm: IOU-based matching with sort
-- Input: Cropped face images
+- Algorithm: IOU-based matching
+- Input: Face detections from step 1
 - Output: Persistent face IDs per detection
 
 ### Step 3: Landmark Extraction (MediaPipe)
-- Model: FaceMesh
+- Model: FaceMesh with blendshapes
 - Input: Cropped face images (not full frame)
-- Output: 468 3D facial landmarks
+- Output: 468 3D facial landmarks + blendshapes
 
 ### Step 4: Direction Estimation
-- Method: PnP solvePnP with 6 key landmarks
+- Method: Ratio-based with eye landmarks
 - Key Landmarks Used:
   | Landmark | Index | Purpose |
   |----------|-------|---------|
   | Nose tip | 1 | Primary reference |
-  | Chin | 234 | Bottom anchor |
   | Left eye | 33 | Left anchor |
   | Right eye | 263 | Right anchor |
   | Left mouth | 61 | Mouth anchor |
   | Right mouth | 291 | Mouth anchor |
-- Output: yaw (left/right), pitch (up/down), roll (tilt)
-- Forward threshold: `abs(yaw) < 15° AND abs(pitch) < 15°`
+- Eye State: Based on `eyeBlinkLeft` and `eyeBlinkRight` blendshapes
+- Pitch Ratio: eye_to_nose / nose_to_mouth (forward: 0.2 - 3.0)
 
 ## Project Structure
 ```
 CMKL-AttentionMonitoring/
 ├── pyproject.toml              # uv dependencies
+├── yolo11n-face.pt             # YOLO face detection model
+├── face_landmarker.task         # MediaPipe landmark model
 ├── app/
 │   ├── __init__.py              # Flask app factory
-│   ├── routes.py                # /dashboard, /upload endpoints
+│   ├── routes.py                # API routes
 │   ├── pipeline/
-│   │   ├── __init__.py
-│   │   ├── detector.py          # YOLOv8s face detection
+│   │   ├── detector.py          # YOLOv11 face detection
 │   │   ├── tracker.py           # ByteTrack tracking
-│   │   ├── landmarks.py         # MediaPipe FaceMesh on cropped
-│   │   └── direction.py         # Head pose from face mesh landmarks
+│   │   ├── landmarks.py         # MediaPipe FaceMesh + Blendshapes
+│   │   └── direction.py         # Head pose & eye state estimation
 │   ├── services/
-│   │   └── video_processor.py   # Orchestrates pipeline per frame
+│   │   ├── video_processor.py  # Frame processing pipeline
+│   │   └── state_logger.py      # CSV logging for persistence
 │   └── templates/
-│       └── dashboard.html       # Main dashboard
+│       ├── dashboard.html        # Main dashboard
+│       └── report.html          # Report page with graphs
 ├── static/
 │   ├── css/style.css
-│   └── js/app.js                # Webcam/upload handling + SSE
-└── requirements.txt
+│   └── js/app.js                # Client-side logic
+└── session_data/                # CSV logs (auto-created)
+    └── YYYYMMDD_HHMMSS.csv
 ```
-
-## Dependencies (uv)
-| Package | Purpose |
-|---------|---------|
-| flask | Web framework |
-| ultralytics | YOLOv8s face detection |
-| ByteTrack | Multi-face tracking |
-| mediapipe | Face mesh landmarks |
-| opencv-python | Image/video processing |
-| numpy | Numerical operations |
 
 ## Dashboard Layout
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
+│  Attention Monitoring System          [View Reports]              │
 │  Mode: (•) Webcam    ( ) Upload Video                            │
 ├─────────────────────────────────┬───────────────────────────────┤
 │                                 │  Face Status                  │
 │     Video Preview               │  ┌─────────────────────────┐ │
 │     (full frame with boxes)     │  │ ID #1: Forward ✓        │ │
-│                                 │  │ ID #2: Looking Left ←    │ │
-│     ┌───┐  ┌───┐               │  │ ID #3: Forward ✓        │ │
-│     │ 1 │  │ 2 │               │  └─────────────────────────┘ │
-│     └───┘  └───┘               │                               │
-│         ┌───┐                  │  Summary                      │
-│         │ 3 │                  │  - Total Faces: 3            │
-│         └───┘                  │  - Attentive: 2 (67%)         │
+│                                 │  │ Eyes Open               │ │
+│     ┌───┐  ┌───┐               │  │ ID #2: Looking Left ←    │ │
+│     │ 1 │  │ 2 │               │  │ Eyes Closed               │ │
+│     └───┘  └───┘               │  └─────────────────────────┘ │
+│         ┌───┐                  │                               │
+│         │ 3 │                  │  Summary                      │
+│         └───┘                  │  - Total Faces: 3            │
 ├─────────────────────────────────┴───────────────────────────────┤
 │  [Start Webcam]  [Upload & Process]  [Stop]                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Dashboard Features
-- **Mode Toggle**: Switch between webcam (live) and upload (video file)
-- **Video Preview**: Full frame with colored bounding boxes and face IDs
-- **Status Panel**: Real-time list of detected faces showing:
-  - Face ID (from ByteTrack)
-  - Status: "Forward" (green) / "Not Forward" (red with direction indicator)
-  - Yaw/Pitch values
-- **Stats Summary**: Total faces, attentive count, attention percentage
+## Report Page
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ← Back to Dashboard                                             │
+│  Attention Monitoring Report                                      │
+├─────────────────────────────────────────────────────────────────┤
+│  [Select Session ▼]                                              │
+│  [Face #1] [Face #2] [Face #3]                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  │ Total Frames │ Avg Attention │ Avg Eyes Open │ Detections │ │
+│  │     1250     │     67.3%    │     89.2%     │    1250   │ │
+├─────────────────────────────────┬───────────────────────────────┤
+│  Attention Over Time            │  Eyes State Over Time          │
+│  ┌─────────────────────────┐   │  ┌─────────────────────────┐ │
+│  │    📈 Graph             │   │  │    📈 Graph             │ │
+│  │    (Forward/Not)        │   │  │    (Open/Closed)        │ │
+│  └─────────────────────────┘   │  └─────────────────────────┘ │
+└─────────────────────────────────┴───────────────────────────────┘
+```
 
 ## API Endpoints
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/dashboard` | GET | Render main dashboard |
-| `/upload` | POST | Upload video file (max 100MB) |
+| `/report` | GET | Render report page with graphs |
+| `/upload` | POST | Upload video file |
 | `/video_feed` | GET | SSE stream of processed frames |
 | `/webcam/start` | POST | Initialize webcam session |
 | `/webcam/stop` | POST | Stop webcam session |
+| `/sessions` | GET | List all saved sessions |
+| `/session/<id>` | GET | Get session data for graphs |
 
 ## Technical Specifications
 | Aspect | Value |
 |--------|-------|
 | Video size limit | 100MB max |
-| Forward threshold | ±15° for both yaw and pitch |
+| Forward threshold | Yaw < 20°, Pitch ratio 0.2 - 3.0 |
+| Eye threshold | Blink < 0.3 = Open |
 | Webcam source | Client-side default webcam |
-| Persistence | None (in-memory only) |
+| Persistence | CSV files in session_data/ |
 
 ## Color Coding
 | Color | Meaning |
 |-------|---------|
-| Green (#00FF00) | Face facing forward (within threshold) |
-| Red (#FF0000) | Face not facing forward (outside threshold) |
+| Green | Face facing forward / Eyes open |
+| Red | Face not facing forward / Eyes closed |
+| Yellow | Nose landmark |
+| Cyan | Eye landmarks |
+| Magenta | Mouth landmarks |

@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attention Monitoring Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .report-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .report-container h1 {
+            margin-bottom: 30px;
+        }
+        
+        .session-selector {
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .session-selector select {
+            width: 100%;
+            padding: 10px;
+            font-size: 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        
+        .face-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .face-btn {
+            padding: 8px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 20px;
+            background: #fff;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .face-btn:hover {
+            border-color: #2563eb;
+        }
+        
+        .face-btn.active {
+            background: #2563eb;
+            color: #fff;
+            border-color: #2563eb;
+        }
+        
+        .charts-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .chart-card canvas {
+            width: 100% !important;
+            max-height: 250px;
+        }
+        
+        .chart-card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .chart-card h3 {
+            margin-bottom: 15px;
+            color: #1e293b;
+        }
+        
+        .stats-summary {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2563eb;
+        }
+        
+        .stat-card .label {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #2563eb;
+            text-decoration: none;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 900px) {
+            .charts-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-summary {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="report-container">
+        <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+        
+        <h1>Attention Monitoring Report</h1>
+        
+        <div class="session-selector">
+            <select id="sessionSelect">
+                <option value="">Select a session...</option>
+            </select>
+            
+            <div id="faceSelector" class="face-selector" style="display: none;">
+                <!-- Face buttons will be added here -->
+            </div>
+        </div>
+        
+        <div id="statsSummary" class="stats-summary" style="display: none;">
+            <div class="stat-card">
+                <div class="value" id="totalFrames">0</div>
+                <div class="label">Total Frames</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="avgAttention">0%</div>
+                <div class="label">Avg Attention</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="avgEyeOpen">0%</div>
+                <div class="label">Avg Eyes Open</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="totalDetections">0</div>
+                <div class="label">Detections</div>
+            </div>
+        </div>
+        
+        <div id="chartsContainer" class="charts-container" style="display: none;">
+            <div class="chart-card">
+                <h3>Attention Over Time</h3>
+                <canvas id="attentionChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Eyes State Over Time</h3>
+                <canvas id="eyesChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let attentionChart = null;
+        let eyesChart = null;
+        let currentData = [];
+        let currentFaceId = null;
+        
+        async function loadSessions() {
+            const response = await fetch('/sessions');
+            const data = await response.json();
+            
+            const select = document.getElementById('sessionSelect');
+            data.sessions.forEach(session => {
+                const option = document.createElement('option');
+                option.value = session.session_id;
+                option.textContent = `${session.session_id} (${new Date(session.modified).toLocaleString()})`;
+                select.appendChild(option);
+            });
+            
+            select.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    loadSession(e.target.value);
+                } else {
+                    document.getElementById('faceSelector').style.display = 'none';
+                    document.getElementById('statsSummary').style.display = 'none';
+                    document.getElementById('chartsContainer').style.display = 'none';
+                }
+            });
+        }
+        
+        async function loadSession(sessionId) {
+            const response = await fetch(`/session/${sessionId}`);
+            const data = await response.json();
+            
+            currentData = data.data;
+            
+            const faceSelector = document.getElementById('faceSelector');
+            faceSelector.innerHTML = '';
+            faceSelector.style.display = 'flex';
+            
+            data.face_ids.forEach(faceId => {
+                const btn = document.createElement('button');
+                btn.className = 'face-btn';
+                btn.textContent = `Face #${faceId}`;
+                btn.onclick = () => selectFace(faceId, btn);
+                faceSelector.appendChild(btn);
+            });
+            
+            if (data.face_ids.length > 0) {
+                selectFace(data.face_ids[0], faceSelector.firstChild);
+            }
+        }
+        
+        function selectFace(faceId, btn) {
+            document.querySelectorAll('.face-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentFaceId = faceId;
+            
+            const faceData = currentData.filter(d => d.face_id === faceId);
+            
+            document.getElementById('statsSummary').style.display = 'grid';
+            document.getElementById('chartsContainer').style.display = 'grid';
+            
+            const totalFrames = faceData.length;
+            const avgAttention = faceData.filter(d => d.is_forward).length / totalFrames * 100;
+            const avgEyeOpen = faceData.filter(d => d.eye_state === 'Eyes Open').length / totalFrames * 100;
+            
+            document.getElementById('totalFrames').textContent = totalFrames;
+            document.getElementById('avgAttention').textContent = avgAttention.toFixed(1) + '%';
+            document.getElementById('avgEyeOpen').textContent = avgEyeOpen.toFixed(1) + '%';
+            document.getElementById('totalDetections').textContent = totalFrames;
+            
+            renderCharts(faceData);
+        }
+        
+        function renderCharts(faceData) {
+            const labels = faceData.map((d, i) => i);
+            
+            const attentionData = faceData.map(d => d.is_forward ? 1 : 0);
+            const eyesData = faceData.map(d => d.eye_state === 'Eyes Open' ? 1 : 0);
+            
+            if (attentionChart) attentionChart.destroy();
+            if (eyesChart) eyesChart.destroy();
+            
+            const attentionCtx = document.getElementById('attentionChart').getContext('2d');
+            attentionChart = new Chart(attentionCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Attention',
+                        data: attentionData,
+                        borderColor: '#22c55e',
+                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 2,
+                        stepped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 1,
+                            ticks: {
+                                stepSize: 1,
+                                callback: (val) => Math.round(val) === 1 ? 'Forward' : 'Not Forward'
+                            }
+                        },
+                        x: {
+                            display: false
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+            
+            const eyesCtx = document.getElementById('eyesChart').getContext('2d');
+            eyesChart = new Chart(eyesCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Eyes',
+                        data: eyesData,
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 2,
+                        stepped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 1,
+                            ticks: {
+                                stepSize: 1,
+                                callback: (val) => Math.round(val) === 1 ? 'Open' : 'Closed'
+                            }
+                        },
+                        x: {
+                            display: false
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+        
+        loadSessions();
+    </script>
+</body>
+</html>
