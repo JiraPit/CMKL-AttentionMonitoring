@@ -38,10 +38,11 @@ API:
 
 ### CSV Data
 
-Session data is saved to session_data/<timestamp>.csv:
+Session data is saved to `session_data/<timestamp>.csv`:
 
-timestamp,frame_count,face_id,is_forward,direction_label,eye_state,yaw,pitch,pitch_ratio
-2026-04-27T14:30:22.123456,1,1,1,Forward,Eyes Open,5.2,2.1,1.5
+| timestamp | frame_count | face_id | is_forward | direction_label | eye_state | yaw  | pitch | pitch_ratio |
+|-----------|-------------|---------|------------|-----------------|-----------|------|-------|-------------|
+| 2026-04-27T14:30:22.123456 | 1 | 1 | 1 | Forward | Eyes Open | 5.2  | 2.1   | 1.5         |
 
 ### Visualization
 
