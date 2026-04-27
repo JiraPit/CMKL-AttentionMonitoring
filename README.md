@@ -12,11 +12,13 @@ The pipeline processes video frames through three stages:
 
 ## Usage
 
+```bash
 # Install dependencies
 uv sync
 
 # Start the Flask server
 uv run python run.py
+```
 
 Server runs at http://localhost:5000
 
